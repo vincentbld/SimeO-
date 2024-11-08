@@ -2,20 +2,20 @@
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
 
-// Déclaration des pins des boutons avec des noms clairs pour NodeMCU
-const int pinButtonVert = 12;  // D6 sur NodeMCU
-const int pinButtonBleu = 0;   // D3 sur NodeMCU
-const int pinButtonJaune = 2;  // D4 sur NodeMCU
-const int pinButtonRouge = 14; // D5 sur NodeMCU
+// Déclaration des pins des boutons avec des noms clairs
+const int pinButtonVert = D6;
+const int pinButtonBleu = D3;
+const int pinButtonJaune = D4;
+const int pinButtonRouge = D5;
 
 // Déclaration des pins des LEDs associées aux boutons
-const int pinLedVert = 4;      // D2 sur NodeMCU
-const int pinLedBleu = 13;     // D7 sur NodeMCU
-const int pinLedJaune = 15;    // D8 sur NodeMCU
-const int pinLedRouge = 16;    // D0 sur NodeMCU (remplace D9 car non supporté)
+const int pinLedVert = D2;
+const int pinLedBleu = D7;
+const int pinLedJaune = D8;
+const int pinLedRouge = D9;
 
-// Déclaration du pin pour le buzzer (utiliser un pin disponible, comme GPIO5)
-const int pinBuzzer = 5;       // SS est mappé sur GPIO5
+// Déclaration du pin pour le buzzer
+const int pinBuzzer = SS;
 
 // Création des objets Button pour chaque bouton
 Button buttonVert(pinButtonVert);
@@ -27,6 +27,8 @@ Button buttonRouge(pinButtonRouge);
 const char* ssid = "miguet_automation";
 const char* password = "vincentbld196300";
 const char* mqtt_server = "192.168.1.5";
+const char* mqtt_user = "username"; // Remplacez par votre nom d'utilisateur MQTT
+const char* mqtt_pass = "TIVVr9jHMx9X3Pr9107b7rsV8WpnpXGdEgyxv5sIv5guw4xyLnp4nB12uwGMLxex";
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -44,33 +46,41 @@ void handleButton(Button &button, int pinLed, const char *buttonName, unsigned l
 void playMelody();
 
 void setup() {
+  // Initialisation du moniteur série pour afficher les messages
   Serial.begin(115200);
 
+  // Configuration des boutons en mode INPUT_PULLUP
   pinMode(pinButtonVert, INPUT_PULLUP);
   pinMode(pinButtonBleu, INPUT_PULLUP);
   pinMode(pinButtonJaune, INPUT_PULLUP);
   pinMode(pinButtonRouge, INPUT_PULLUP);
 
+  // Configuration des LEDs en mode OUTPUT
   pinMode(pinLedVert, OUTPUT);
   pinMode(pinLedBleu, OUTPUT);
   pinMode(pinLedJaune, OUTPUT);
   pinMode(pinLedRouge, OUTPUT);
 
+  // Configuration du buzzer en mode OUTPUT
   pinMode(pinBuzzer, OUTPUT);
-  noTone(pinBuzzer);
+  noTone(pinBuzzer); // Éteindre le buzzer au début
 
+  // Éteindre toutes les LEDs au début
   digitalWrite(pinLedVert, LOW);
   digitalWrite(pinLedBleu, LOW);
   digitalWrite(pinLedJaune, LOW);
   digitalWrite(pinLedRouge, LOW);
 
+  // Connexion WiFi
   setup_wifi();
 
+  // Configuration du client MQTT
   client.setServer(mqtt_server, 1883);
   client.setCallback(mqttCallback);
-
+  // S'abonner aux topics MQTT
   client.subscribe("simeo/all");
   client.subscribe("simeo/color/#");
+  client.setCallback(mqttCallback);
 }
 
 void setup_wifi() {
@@ -93,12 +103,15 @@ void setup_wifi() {
 }
 
 void reconnect() {
+  // Boucle jusqu'à ce que la connexion soit établie
   while (!client.connected()) {
     Serial.print("Connexion au serveur MQTT...");
-    if (client.connect("SimonGameClient")) {
+    if (client.connect("SimonGameClient", mqtt_user, mqtt_pass)) { // Ajout des identifiants MQTT
       Serial.println("connecté");
+      // Réabonnement aux topics MQTT après reconnexion
       client.subscribe("simeo/all");
       client.subscribe("simeo/color/#");
+      Serial.println("Abonné aux topics MQTT");
     } else {
       Serial.print("échec, rc=");
       Serial.print(client.state());
@@ -107,6 +120,10 @@ void reconnect() {
     }
   }
 }
+
+// Reste du code identique, sans modification
+
+
 
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
   Serial.print("Message reçu [");
