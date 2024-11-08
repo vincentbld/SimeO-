@@ -2,85 +2,46 @@
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
 
-// Déclaration des pins des boutons avec des noms clairs
-const int pinButtonVert = D6;
-const int pinButtonBleu = D3;
-const int pinButtonJaune = D4;
-const int pinButtonRouge = D5;
+// Déclaration des pins des boutons et LEDs
+const int pinButtonVert = 12, pinButtonBleu = 0, pinButtonJaune = 2, pinButtonRouge = 14;
+const int pinLedVert = 4, pinLedBleu = 13, pinLedJaune = 15, pinLedRouge = 16;
+const int pinBuzzer = 5; // Buzzer
 
-// Déclaration des pins des LEDs associées aux boutons
-const int pinLedVert = D2;
-const int pinLedBleu = D7;
-const int pinLedJaune = D8;
-const int pinLedRouge = D9;
-
-// Déclaration du pin pour le buzzer
-const int pinBuzzer = SS;
-
-// Création des objets Button pour chaque bouton
-Button buttonVert(pinButtonVert);
-Button buttonBleu(pinButtonBleu);
-Button buttonJaune(pinButtonJaune);
-Button buttonRouge(pinButtonRouge);
-
-// Configuration WiFi et MQTT
-const char* ssid = "miguet_automation";
-const char* password = "vincentbld196300";
-const char* mqtt_server = "192.168.1.5";
-const char* mqtt_user = "username"; // Remplacez par votre nom d'utilisateur MQTT
-const char* mqtt_pass = "TIVVr9jHMx9X3Pr9107b7rsV8WpnpXGdEgyxv5sIv5guw4xyLnp4nB12uwGMLxex";
+// Fréquences des notes pour chaque couleur
+const int freqVert = 1000, freqBleu = 1200, freqJaune = 1400, freqRouge = 1600;
 
 WiFiClient espClient;
 PubSubClient client(espClient);
 
-unsigned long lastDebounceTimeVert = 0;
-unsigned long lastDebounceTimeBleu = 0;
-unsigned long lastDebounceTimeJaune = 0;
-unsigned long lastDebounceTimeRouge = 0;
+// Objets Button
+Button buttonVert(pinButtonVert), buttonBleu(pinButtonBleu), buttonJaune(pinButtonJaune), buttonRouge(pinButtonRouge);
+
+const char* ssid = "miguet_automation";
+const char* password = "vincentbld196300";
+const char* mqtt_server = "192.168.1.5";
+
+unsigned long lastDebounceTimeVert = 0, lastDebounceTimeBleu = 0, lastDebounceTimeJaune = 0, lastDebounceTimeRouge = 0;
 const unsigned long debounceDelay = 50;
 
-void mqttCallback(char* topic, byte* payload, unsigned int length);
-void allLedsOn();
-void controlLedByColor(String color);
-void handleButton(Button &button, int pinLed, const char *buttonName, unsigned long currentMillis, unsigned long &lastDebounceTime);
-void playMelody();
-
 void setup() {
-  // Initialisation du moniteur série pour afficher les messages
   Serial.begin(115200);
+  setup_wifi();
+  client.setServer(mqtt_server, 1883);
+  client.setCallback(mqttCallback);
 
-  // Configuration des boutons en mode INPUT_PULLUP
+  // Configuration des LEDs et des boutons
+  pinMode(pinLedVert, OUTPUT);
+  pinMode(pinLedBleu, OUTPUT);
+  pinMode(pinLedJaune, OUTPUT);
+  pinMode(pinLedRouge, OUTPUT);
+  pinMode(pinBuzzer, OUTPUT);
+  
   pinMode(pinButtonVert, INPUT_PULLUP);
   pinMode(pinButtonBleu, INPUT_PULLUP);
   pinMode(pinButtonJaune, INPUT_PULLUP);
   pinMode(pinButtonRouge, INPUT_PULLUP);
 
-  // Configuration des LEDs en mode OUTPUT
-  pinMode(pinLedVert, OUTPUT);
-  pinMode(pinLedBleu, OUTPUT);
-  pinMode(pinLedJaune, OUTPUT);
-  pinMode(pinLedRouge, OUTPUT);
-
-  // Configuration du buzzer en mode OUTPUT
-  pinMode(pinBuzzer, OUTPUT);
-  noTone(pinBuzzer); // Éteindre le buzzer au début
-
-  // Éteindre toutes les LEDs au début
-  digitalWrite(pinLedVert, LOW);
-  digitalWrite(pinLedBleu, LOW);
-  digitalWrite(pinLedJaune, LOW);
-  digitalWrite(pinLedRouge, LOW);
-
-  // Connexion WiFi
-  setup_wifi();
-
-  // Configuration du client MQTT
-  client.setServer(mqtt_server, 1883);
-  client.setCallback(mqttCallback);
-  // S'abonner aux topics MQTT
-  client.subscribe("simeo/all");
-  client.subscribe("simeo/color/#");
-  client.setCallback(mqttCallback);
+  noTone(pinBuzzer);  // Désactiver le buzzer au démarrage
 }
 
 void setup_wifi() {
@@ -88,63 +49,71 @@ void setup_wifi() {
   Serial.println();
   Serial.print("Connexion à ");
   Serial.println(ssid);
-
   WiFi.begin(ssid, password);
 
   while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
+    delay(100);
     Serial.print(".");
   }
 
-  Serial.println("");
   Serial.println("WiFi connecté");
-  Serial.println("Adresse IP : ");
-  Serial.println(WiFi.localIP());
 }
 
 void reconnect() {
-  // Boucle jusqu'à ce que la connexion soit établie
   while (!client.connected()) {
     Serial.print("Connexion au serveur MQTT...");
-    if (client.connect("SimonGameClient", mqtt_user, mqtt_pass)) { // Ajout des identifiants MQTT
+    if (client.connect("SimonGameClient")) {
       Serial.println("connecté");
-      // Réabonnement aux topics MQTT après reconnexion
-      client.subscribe("simeo/all");
-      client.subscribe("simeo/color/#");
+
+      // Abonnement aux topics
+      client.subscribe("home/simeo/led/#");
+      client.subscribe("home/simeo/buzzer/command");
+
       Serial.println("Abonné aux topics MQTT");
     } else {
       Serial.print("échec, rc=");
       Serial.print(client.state());
-      Serial.println(" nouvelle tentative dans 5 secondes");
-      delay(5000);
+      Serial.println(" nouvelle tentative dans 1 seconde");
+      delay(1000);
     }
   }
 }
 
-// Reste du code identique, sans modification
-
-
-
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
-  Serial.print("Message reçu [");
-  Serial.print(topic);
-  Serial.print("] : ");
-  for (int i = 0; i < length; i++) {
-    Serial.print((char)payload[i]);
-  }
-  Serial.println();
+  // Afficher le topic et le message reçu
+  Serial.print("Message reçu sur le topic : ");
+  Serial.println(topic);
+
+  String topicStr = String(topic);
   String message;
   for (int i = 0; i < length; i++) {
     message += (char)payload[i];
   }
 
-  if (String(topic) == "simeo/all") {
-    if (message == "on") {
-      allLedsOn();
+  // Afficher le message reçu
+  Serial.print("Message reçu : ");
+  Serial.println(message);
+
+  // Contrôle des LEDs via MQTT
+  if (topicStr.startsWith("home/simeo/led/")) {
+    int startIndex = String("home/simeo/led/").length();
+    int endIndex = topicStr.lastIndexOf("/");
+    String color = topicStr.substring(startIndex, endIndex);
+    String command = message;
+
+    // Contrôler la LED par couleur
+    if (command == "on") {
+      Serial.println("Commande ON reçue pour la couleur : " + color);
+      controlLedByColor(color, true);  // Allumer la LED
+    } else if (command == "off") {
+      Serial.println("Commande OFF reçue pour la couleur : " + color);
+      controlLedByColor(color, false);  // Éteindre la LED
     }
-  } else if (String(topic).startsWith("simeo/color/")) {
-    String color = String(topic).substring(12);
-    controlLedByColor(color);
+  }
+
+  // Contrôle du buzzer via MQTT
+  if (topicStr == "home/simeo/buzzer/command") {
+    controlBuzzer(message);  // Contrôle du buzzer
   }
 }
 
@@ -154,84 +123,92 @@ void loop() {
   }
   client.loop();
 
+  // Lecture des boutons et gestion des LEDs associées
   unsigned long currentMillis = millis();
 
-  buttonVert.read();
-  buttonBleu.read();
-  buttonJaune.read();
-  buttonRouge.read();
-
-  handleButton(buttonVert, pinLedVert, "Vert", currentMillis, lastDebounceTimeVert);
-  handleButton(buttonBleu, pinLedBleu, "Bleu", currentMillis, lastDebounceTimeBleu);
-  handleButton(buttonJaune, pinLedJaune, "Jaune", currentMillis, lastDebounceTimeJaune);
-  handleButton(buttonRouge, pinLedRouge, "Rouge", currentMillis, lastDebounceTimeRouge);
-
-  delay(50);
+  handleButton(buttonVert, pinLedVert, "Vert", currentMillis, lastDebounceTimeVert, freqVert);
+  handleButton(buttonBleu, pinLedBleu, "Bleu", currentMillis, lastDebounceTimeBleu, freqBleu);
+  handleButton(buttonJaune, pinLedJaune, "Jaune", currentMillis, lastDebounceTimeJaune, freqJaune);
+  handleButton(buttonRouge, pinLedRouge, "Rouge", currentMillis, lastDebounceTimeRouge, freqRouge);
 }
 
-void handleButton(Button &button, int pinLed, const char *buttonName, unsigned long currentMillis, unsigned long &lastDebounceTime) {
+// Fonction de gestion des boutons et LEDs
+void handleButton(Button &button, int pinLed, const char *buttonName, unsigned long currentMillis, unsigned long &lastDebounceTime, int frequency) {
   if (button.pressed() && (currentMillis - lastDebounceTime > debounceDelay)) {
     lastDebounceTime = currentMillis;
-    Serial.print("Bouton ");
-    Serial.print(buttonName);
-    Serial.println(" appuyé");
     digitalWrite(pinLed, HIGH);
-    String topic = "simeo/";
-    topic += buttonName;
-    client.publish(topic.c_str(), "on");
 
-    playMelody();
+    // Publier l'état du bouton via MQTT
+    String topic = "home/simeo/button/" + String(buttonName) + "/state";
+    String payload = "{\"state\": \"on\", \"button\": \"" + String(buttonName) + "\", \"timestamp\": " + String(currentMillis) + "}";
+    client.publish(topic.c_str(), payload.c_str());
+
+    playMelody(frequency);  // Jouer la note associée
   }
+
   if (button.released() && (currentMillis - lastDebounceTime > debounceDelay)) {
     lastDebounceTime = currentMillis;
-    Serial.print("Bouton ");
-    Serial.print(buttonName);
-    Serial.println(" relâché");
     digitalWrite(pinLed, LOW);
-    String topic = "simeo/";
-    topic += buttonName;
-    client.publish(topic.c_str(), "off");
 
-    noTone(pinBuzzer);
+    // Publier l'état du bouton via MQTT
+    String topic = "home/simeo/button/" + String(buttonName) + "/state";
+    String payload = "{\"state\": \"off\", \"button\": \"" + String(buttonName) + "\", \"timestamp\": " + String(currentMillis) + "}";
+    client.publish(topic.c_str(), payload.c_str());
+
+    noTone(pinBuzzer);  // Arrêter la mélodie
   }
 }
 
-void allLedsOn() {
-  digitalWrite(pinLedVert, HIGH);
-  digitalWrite(pinLedBleu, HIGH);
-  digitalWrite(pinLedJaune, HIGH);
-  digitalWrite(pinLedRouge, HIGH);
-  tone(pinBuzzer, 1000);
-  delay(5000);
-  noTone(pinBuzzer);
-  digitalWrite(pinLedVert, LOW);
-  digitalWrite(pinLedBleu, LOW);
-  digitalWrite(pinLedJaune, LOW);
-  digitalWrite(pinLedRouge, LOW);
-}
-
-void controlLedByColor(String color) {
+// Fonction pour contrôler les LEDs via MQTT
+void controlLedByColor(String color, bool state) {
   int pinLed = -1;
+  int frequency = 0;
+
   if (color == "Vert") {
     pinLed = pinLedVert;
+    frequency = freqVert;
   } else if (color == "Bleu") {
     pinLed = pinLedBleu;
+    frequency = freqBleu;
   } else if (color == "Jaune") {
     pinLed = pinLedJaune;
+    frequency = freqJaune;
   } else if (color == "Rouge") {
     pinLed = pinLedRouge;
+    frequency = freqRouge;
   }
 
+  // Contrôler la LED correspondante
   if (pinLed != -1) {
-    digitalWrite(pinLed, HIGH);
-    tone(pinBuzzer, 1000, 200);
-    delay(200);
-    digitalWrite(pinLed, LOW);
+    if (state) {  // Allumer la LED
+      digitalWrite(pinLed, HIGH);
+      Serial.println("LED " + color + " allumée.");
+      playMelody(frequency);  // Jouer une mélodie
+    } else {  // Éteindre la LED
+      digitalWrite(pinLed, LOW);
+      Serial.println("LED " + color + " éteinte.");
+    }
+  } else {
+    Serial.println("Erreur : Couleur non reconnue.");
   }
 }
 
-void playMelody() {
-  tone(pinBuzzer, 1000, 200);
-  delay(250);
-  tone(pinBuzzer, 1500, 200);
+// Contrôle du buzzer via MQTT
+void controlBuzzer(String command) {
+  if (command == "on") {
+    tone(pinBuzzer, 1000);  // Jouer une note
+  } else if (command == "off") {
+    noTone(pinBuzzer);  // Arrêter la note
+  }
+}
+
+// Fonction pour jouer une mélodie sur le buzzer
+void playMelody(int frequency) {
+  tone(pinBuzzer, frequency, 150);  // Jouer une note
+  delay(150);
+  noTone(pinBuzzer);
+  delay(50);
+  tone(pinBuzzer, frequency + 500, 150);  // Jouer une seconde note
+  delay(150);
+  noTone(pinBuzzer);
 }
