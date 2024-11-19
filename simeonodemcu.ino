@@ -19,6 +19,8 @@ Button buttonVert(pinButtonVert), buttonBleu(pinButtonBleu), buttonJaune(pinButt
 const char* ssid = "miguet_automation";
 const char* password = "vincentbld196300";
 const char* mqtt_server = "192.168.1.5";
+const char* mqtt_user = "votre_utilisateur"; // Remplacez par votre utilisateur MQTT
+const char* mqtt_password = "votre_mot_de_passe"; // Remplacez par votre mot de passe MQTT
 
 unsigned long lastDebounceTimeVert = 0, lastDebounceTimeBleu = 0, lastDebounceTimeJaune = 0, lastDebounceTimeRouge = 0;
 const unsigned long debounceDelay = 50;
@@ -62,7 +64,7 @@ void setup_wifi() {
 void reconnect() {
   while (!client.connected()) {
     Serial.print("Connexion au serveur MQTT...");
-    if (client.connect("SimonGameClient")) {
+    if (client.connect("SimonGameClient", mqtt_user, mqtt_password)) {
       Serial.println("connecté");
 
       // Abonnement aux topics
@@ -97,8 +99,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   // Contrôle des LEDs via MQTT
   if (topicStr.startsWith("home/simeo/led/")) {
     int startIndex = String("home/simeo/led/").length();
-    int endIndex = topicStr.lastIndexOf("/");
-    String color = topicStr.substring(startIndex, endIndex);
+    String color = topicStr.substring(startIndex);
     String command = message;
 
     // Contrôler la LED par couleur
